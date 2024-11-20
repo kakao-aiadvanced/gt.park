@@ -11,7 +11,7 @@ from langchain_openai import ChatOpenAI
 from langchain_core.output_parsers import JsonOutputParser
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
-
+from langchain.schema import Runnable
 
 urls = [
     "https://lilianweng.github.io/posts/2023-06-23-agent/",
@@ -71,8 +71,14 @@ llm = ChatOpenAI(model="gpt-4o-mini")
 prompt = prompt = hub.pull("rlm/rag-prompt")
 
 parser = JsonOutputParser()
+
+class RelevanceQuestionBuilder(Runnable):
+    def invoke(self, input: str) -> str:
+        return "query: %s; query와 주어진 context를 보고, 문서의 연관성을 엄격히 본 다음 JSON 포맷으로 출력해주세요.  {\"query\", \"context\", \"relevance\": \"yes\" 또는 \"no\"}라고 대답해" % input
+
 rag_chain = (
-    {"context": retriever, "question": RunnablePassthrough()}
+
+    {"context": retriever, "question": RelevanceQuestionBuilder()}
     | prompt
     | llm
     | parser
@@ -83,10 +89,10 @@ def createTestRelevanceQuestion(query):
     print("query: " + (query))
     return question
 
-results = rag_chain.invoke(createTestRelevanceQuestion("agent memory"))
+results = rag_chain.invoke("agent memory")
 # result = rag_chain.invoke("question과 answer를 다음과 같이 출력해주세요. {\"relevance\": \"yes\" 또는 \"no\"}라고 대답해")
 print(results)
-
+print("ragChain" + str(rag_chain))
 
 
 #6. 5 에서 모든 docs에 대해 'yes' 가 나와야 하는 케이스와 ‘no’ 가 나와야 하는 케이스를 작성해보세요.
@@ -100,7 +106,7 @@ expectNoQueries = ["gt.park", "jin.jang", "jaden.dev", "bryan.ko"]
 print("#7 start")
 def testQueriesExpected(chain, queries, expect):
     for query in queries:
-        ragChainResult = chain.invoke(createTestRelevanceQuestion(query))
+        ragChainResult = chain.invoke(query)
         print(ragChainResult)
         if (ragChainResult["relevance"] != expect):
             return False
@@ -115,7 +121,7 @@ print("Expect 'no' all success: %s" % expectNoTestResult)
 # 4의 retrieved chunk 를 가지고 답변하는 chain 코드를 작성해주세요. (prompt | llm | parser 형태의 코드)
 print("#8 start")
 qa_chain = (
-    {"context": retriever, "question": RunnablePassthrough()}
+    {"context": retriever, "question": RelevanceQuestionBuilder()}
     | prompt
     | llm
     | StrOutputParser()
@@ -126,21 +132,21 @@ for chunk in qa_chain.stream("What is Task Decomposition?"):
 # 9. 생성된 답안에 Hallucination 이 있는지 평가하는 시스템 프롬프트를 작성해보세요.
 # LLM이 스스로 평가하도록 하고, hallucination 이 있으면 {‘hallucination’: ‘yes’} 없으면 {‘hallucination’: ‘no’} 라고 출력하도록 하세요.
 print("#9 start")
+class HallucinationQuestionBuilder(Runnable):
+    def invoke(self, input: str) -> str:
+        return "query: %s; query와 주어진 context를 보고, Answer 안에 Hallucination이 있는지 JSON 포맷으로 출력해주세요.  {\"query\", \"context\", \"hallucination\": \"yes\" 또는 \"no\"}라고 대답해" % input
+
 qa_test_chain = (
-    {"context": retriever, "question": RunnablePassthrough()}
+    {"context": retriever, "question": HallucinationQuestionBuilder()}
     | prompt
     | llm
     | JsonOutputParser()
 )
 
-def createTestHallucinationQuestion(query):
-    question = "query: " + query + "; query와 주어진 context를 보고, Answer 안에 Hallucination이 있는지 JSON 포맷으로 출력해주세요.  {\"query\", \"context\", \"hallucination\": \"yes\" 또는 \"no\"}라고 대답해"
-    print("query: " + (query))
-    return question
 
 def testQaQueriesExpected(chain, queries, expect):
     for query in queries:
-        ragChainResult = chain.invoke(createTestHallucinationQuestion(query))
+        ragChainResult = chain.invoke(query)
         print(ragChainResult)
         if (ragChainResult["hallucination"] != expect):
             return False
@@ -153,7 +159,7 @@ results = testQaQueriesExpected(qa_test_chain, expectNonHallucinationQueries, "n
 #10. 9 에서 ‘yes’ 면 8 로 돌아가서 다시 생성, ‘no’ 면 답변 생성하고 유저에게 답변 생성에 사용된 출처와 함께 출력하도록 하세요. (최대 1번까지 다시 생성)
 print("#10 start")
 qa_chain = (
-    {"context": retriever, "question": RunnablePassthrough()}
+    {"context": retriever, "question": HallucinationQuestionBuilder()}
     | prompt
     | llm
     | StrOutputParser()
